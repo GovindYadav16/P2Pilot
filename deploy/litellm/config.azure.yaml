@@ -1,0 +1,79 @@
+# LiteLLM gateway config.
+#   fast      -> Azure gpt-5-mini (fallback: DeepSeek chat)
+#   reasoning -> DeepSeek reasoner (fallback: Azure gpt-5-mini, high effort)
+#   embed     -> Azure text-embedding-3-small (no fallback, on purpose)
+# DeepSeek is hosted outside India/US/EU: fine for synthetic data; residency-restricted
+# tenants must be pinned to Azure only (fail-closed rule, Sprint 3).
+# The app only ever asks for the aliases: fast / reasoning / embed.
+#
+# Azure deployments (Foundry project rg-p2pilot-proj on resource p2pilotproject):
+#   fast-mini      -> gpt-5-mini              (Global Standard)
+#   embed-small    -> text-embedding-3-small  (Global Standard)
+#   reasoning-main -> gpt-5.1, only if quota is approved later
+#
+# Secrets come from .env: AZURE_API_BASE, AZURE_API_KEY, AZURE_API_VERSION, DEEPSEEK_API_KEY.
+
+model_list:
+  # ---- Primary: Azure
+  - model_name: fast
+    litellm_params:
+      model: azure/fast-mini
+      api_base: os.environ/AZURE_API_BASE
+      api_key: os.environ/AZURE_API_KEY
+      api_version: os.environ/AZURE_API_VERSION
+      reasoning_effort: low        # gpt-5-mini is a reasoning model; keep routing/extraction quick
+      timeout: 30
+      stream_timeout: 60
+
+  # "reasoning" primary is DeepSeek (no Azure quota for large GPT models yet).
+  # Fallback below is the same Azure gpt-5-mini deployment thinking harder.
+  # If gpt-5.1 quota is approved later: point this alias at azure/reasoning-main.
+  - model_name: reasoning
+    litellm_params:
+      model: deepseek/deepseek-reasoner
+      api_key: os.environ/DEEPSEEK_API_KEY
+      timeout: 120
+      stream_timeout: 180
+
+  # Embeddings have NO fallback: a different embedding model would silently
+  # corrupt the vector space (fail-closed).
+  - model_name: embed
+    litellm_params:
+      model: azure/embed-small
+      api_base: os.environ/AZURE_API_BASE
+      api_key: os.environ/AZURE_API_KEY
+      api_version: os.environ/AZURE_API_VERSION
+
+  # ---- Fallbacks
+  - model_name: fast-deepseek
+    litellm_params:
+      model: deepseek/deepseek-chat
+      api_key: os.environ/DEEPSEEK_API_KEY
+      timeout: 30
+
+  - model_name: reasoning-azure
+    litellm_params:
+      model: azure/fast-mini
+      api_base: os.environ/AZURE_API_BASE
+      api_key: os.environ/AZURE_API_KEY
+      api_version: os.environ/AZURE_API_VERSION
+      reasoning_effort: high
+      timeout: 120
+      stream_timeout: 180
+
+router_settings:
+  # If the primary for an alias errors or times out, retry on the listed fallback.
+  fallbacks:
+    - fast: ["fast-deepseek"]
+    - reasoning: ["reasoning-azure"]
+  # Deliberately no fallback for "embed".
+  num_retries: 1
+  allowed_fails: 2      # after 2 failures in a minute, cool the deployment down
+  cooldown_time: 30
+
+litellm_settings:
+  request_timeout: 60
+  drop_params: true     # strips params a model does not support (e.g. temperature on reasoning models)
+
+general_settings:
+  master_key: os.environ/LITELLM_MASTER_KEY

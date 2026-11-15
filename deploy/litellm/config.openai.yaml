@@ -1,0 +1,28 @@
+# LiteLLM gateway config - OpenAI as the primary provider.
+# Swap model names freely; the app only sees the aliases.
+
+model_list:
+  - model_name: fast
+    litellm_params:
+      model: openai/gpt-4o-mini
+      api_key: os.environ/OPENAI_API_KEY
+      timeout: 30
+
+  - model_name: reasoning
+    litellm_params:
+      model: openai/gpt-4.1
+      api_key: os.environ/OPENAI_API_KEY
+      timeout: 90
+
+  - model_name: embed
+    litellm_params:
+      model: openai/text-embedding-3-small
+      api_key: os.environ/OPENAI_API_KEY
+
+litellm_settings:
+  num_retries: 2
+  request_timeout: 60
+  drop_params: true
+
+general_settings:
+  master_key: os.environ/LITELLM_MASTER_KEY
